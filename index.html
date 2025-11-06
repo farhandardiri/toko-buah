@@ -545,7 +545,7 @@
       // ==================== CONFIGURATION ====================
       // Ganti dengan URL Web App Anda setelah deploy
       const WEB_APP_URL =
-        "https://script.google.com/macros/s/AKfycbxT2V4rTO4C7l_1q0cpEH_s_L64hua4frZ5D62jrqjiK8xMEc5iZoMSPkZ23WbuR-reOQ/exec";
+        "https://script.google.com/macros/s/AKfycbyze1_eKBfxv6_RZ-JCXN9Zb4sMi6U8T3IusYWn1Vo0GE1zkhBQqwdVY74UsiCwZH100g/exec";
 
       const SHEETS = {
         MASTER_BUAH: "master_buah",
@@ -561,10 +561,7 @@
       async function getSheetData(sheetName) {
         try {
           const url = `${WEB_APP_URL}?action=getData&sheet=${sheetName}`;
-          const response = await fetch(url, {
-            method: "GET",
-            redirect: "follow", // Follow redirects
-          });
+          const response = await fetch(url);
 
           if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
@@ -584,6 +581,7 @@
           );
         }
       }
+
       async function appendToSheet(sheetName, data) {
         try {
           const url = `${WEB_APP_URL}?action=appendData&sheet=${sheetName}`;
@@ -625,47 +623,23 @@
 
       function showAlert(message, type = "success") {
         const alertDiv = document.createElement("div");
-        alertDiv.className = `alert alert-${type} alert-dismissible fade show`;
-        alertDiv.setAttribute("role", "alert");
+        alertDiv.className = `alert alert-${type} alert-dismissible fade show mt-2`;
         alertDiv.innerHTML = `
     ${message}
-    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
   `;
 
         const container = document.querySelector(".container-fluid");
-        const tabContent = document.querySelector(".tab-content");
+        const tabContent = container.querySelector(".tab-content");
 
-        try {
-          if (container) {
-            // Jika tabContent memang anak dari container -> insertBefore
-            if (tabContent && container.contains(tabContent)) {
-              container.insertBefore(alertDiv, tabContent);
-            } else {
-              // Jika tabContent tidak ada atau bukan anak container -> prepend ke container
-              if (typeof container.prepend === "function") {
-                container.prepend(alertDiv);
-              } else {
-                container.insertBefore(alertDiv, container.firstChild);
-              }
-            }
-          } else {
-            // fallback ke body
-            if (typeof document.body.prepend === "function") {
-              document.body.prepend(alertDiv);
-            } else {
-              document.body.insertBefore(alertDiv, document.body.firstChild);
-            }
-          }
-        } catch (err) {
-          // fallback aman jika terjadi error tak terduga
-          console.error("showAlert insert error:", err);
-          if (document.body) document.body.appendChild(alertDiv);
+        if (container && tabContent && tabContent.parentElement === container) {
+          container.insertBefore(alertDiv, tabContent);
+        } else {
+          // fallback jika tidak dalam satu parent
+          container.prepend(alertDiv);
         }
 
-        // Hapus alert setelah 5 detik jika masih terpasang
-        setTimeout(() => {
-          if (alertDiv && alertDiv.parentElement) alertDiv.remove();
-        }, 5000);
+        setTimeout(() => alertDiv.remove(), 5000);
       }
 
       // ==================== CORE BUSINESS LOGIC ====================
@@ -1443,7 +1417,6 @@
       window.editMasterData = editMasterData;
       window.deleteMasterData = deleteMasterData;
     </script>
-
     <!-- modal -->
     <!-- Modal untuk Master Data -->
     <div class="modal fade" id="masterModal" tabindex="-1">

@@ -536,15 +536,32 @@
           </div>
         </div>
       </div>
+      <div class="d-flex justify-content-end mb-3">
+        <button id="loginBtn" class="btn btn-primary" onclick="login()">
+          <i class="bi bi-google"></i> Login dengan Google
+        </button>
+        <button
+          id="logoutBtn"
+          class="btn btn-outline-danger"
+          onclick="logout()"
+          style="display: none"
+        >
+          <i class="bi bi-box-arrow-right"></i> Logout
+        </button>
+      </div>
     </div>
 
     <!-- Bootstrap JS -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
-
     <script>
       // ==================== CONFIGURATION ====================
       const SPREADSHEET_ID = "1ThcHof6jVMwKkcgT9qVeikewmFm_3G0IdHnxElif5rA";
       const API_KEY = "AIzaSyDEif5uDoVmYUxrthp8AT1v3aurWdJgLfo";
+
+      // OAuth Configuration - GANTI DENGAN CLIENT ID ANDA
+      const CLIENT_ID =
+        "1060874294167-jtgis0o8blc7c9qb8g1jrnujkq072u5i.apps.googleusercontent.com";
+      const SCOPES = "https://www.googleapis.com/auth/spreadsheets";
 
       const SHEETS = {
         MASTER_BUAH: "master_buah",
@@ -556,59 +573,181 @@
         TRANSAKSI_OPERASIONAL: "transaksi_operasional",
       };
 
+      // ==================== OAUTH MANAGEMENT ====================
+      let accessToken = null;
+      let isAuthenticated = false;
+
+      // Initialize OAuth
+      function initAuth() {
+        const token = localStorage.getItem("gsheets_token");
+        const expiry = localStorage.getItem("gsheets_token_expiry");
+
+        if (token && expiry && new Date().getTime() < parseInt(expiry)) {
+          accessToken = token;
+          isAuthenticated = true;
+          updateAuthUI(true);
+        } else {
+          // Clear expired tokens
+          localStorage.removeItem("gsheets_token");
+          localStorage.removeItem("gsheets_token_expiry");
+          updateAuthUI(false);
+        }
+
+        // Check for OAuth callback
+        handleOAuthCallback();
+      }
+
+      function handleOAuthCallback() {
+        const hash = window.location.hash.substring(1);
+        const params = new URLSearchParams(hash);
+
+        const token = params.get("access_token");
+        const expiresIn = params.get("expires_in");
+
+        if (token) {
+          // Save token
+          accessToken = token;
+          isAuthenticated = true;
+          const expiryTime = new Date().getTime() + parseInt(expiresIn) * 1000;
+
+          localStorage.setItem("gsheets_token", token);
+          localStorage.setItem("gsheets_token_expiry", expiryTime.toString());
+
+          // Clean URL
+          window.history.replaceState(
+            {},
+            document.title,
+            window.location.pathname
+          );
+
+          updateAuthUI(true);
+          showAlert("Login berhasil!", "success");
+
+          // Reload data after login
+          system.loadAllData();
+        }
+      }
+
+      function updateAuthUI(loggedIn) {
+        const loginBtn = document.getElementById("loginBtn");
+        const logoutBtn = document.getElementById("logoutBtn");
+        const protectedSections =
+          document.querySelectorAll(".protected-section");
+
+        if (loggedIn) {
+          if (loginBtn) loginBtn.style.display = "none";
+          if (logoutBtn) logoutBtn.style.display = "block";
+          protectedSections.forEach((section) => {
+            section.style.display = "block";
+          });
+        } else {
+          if (loginBtn) loginBtn.style.display = "block";
+          if (logoutBtn) logoutBtn.style.display = "none";
+          protectedSections.forEach((section) => {
+            section.style.display = "none";
+          });
+        }
+      }
+
+      function login() {
+        const authUrl =
+          `https://accounts.google.com/o/oauth2/v2/auth?` +
+          `client_id=${CLIENT_ID}&` +
+          `redirect_uri=${encodeURIComponent(
+            window.location.origin + window.location.pathname
+          )}&` +
+          `response_type=token&` +
+          `scope=${encodeURIComponent(SCOPES)}&` +
+          `include_granted_scopes=true`;
+
+        window.location.href = authUrl;
+      }
+
+      function logout() {
+        if (accessToken) {
+          // Try to revoke token
+          fetch(
+            `https://accounts.google.com/o/oauth2/revoke?token=${accessToken}`
+          ).catch((err) => console.log("Token revoke error:", err));
+        }
+
+        localStorage.removeItem("gsheets_token");
+        localStorage.removeItem("gsheets_token_expiry");
+        accessToken = null;
+        isAuthenticated = false;
+        updateAuthUI(false);
+        showAlert("Anda telah logout", "info");
+      }
+
       // ==================== CORS PROXY FALLBACK ====================
       async function fetchWithCorsFallback(url, options = {}) {
         try {
-          // 🔹 Coba fetch langsung (tanpa proxy)
           const response = await fetch(url, options);
-
-          // Jika berhasil dan status OK, kembalikan hasilnya
           if (response.ok) return response;
-
-          // Jika gagal (status bukan 200), lempar agar lanjut ke fallback
           throw new Error(`Direct fetch failed with status ${response.status}`);
         } catch (error) {
           console.warn(
             "⚠️ Direct fetch failed, mencoba lewat CORS proxy:",
             error.message
           );
-
-          // 🔹 Gunakan proxy publik yang tidak perlu aktivasi manual
           const proxyUrl = "https://corsproxy.io/?" + encodeURIComponent(url);
-
-          // Pastikan headers tetap dikirim (kecuali origin akan diatur otomatis oleh proxy)
           const response = await fetch(proxyUrl, options);
-
-          if (!response.ok) {
+          if (!response.ok)
             throw new Error(`CORS proxy failed with status ${response.status}`);
-          }
-
           return response;
         }
       }
 
-      // Update fungsi getSheetData dan appendToSheet
+      // ==================== API FUNCTIONS WITH OAUTH ====================
       async function getSheetData(sheetName) {
         const url = `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/${sheetName}?key=${API_KEY}`;
-
         const response = await fetchWithCorsFallback(url);
         const data = await response.json();
         return data.values || [];
       }
 
       async function appendToSheet(sheetName, data) {
+        if (!isAuthenticated) {
+          throw new Error("Silakan login terlebih dahulu untuk menambah data");
+        }
+
         const values = [data];
-        const url = `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/${sheetName}:append?valueInputOption=RAW&key=${API_KEY}`;
+        const url = `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/${sheetName}:append?valueInputOption=RAW`;
 
         const response = await fetchWithCorsFallback(url, {
           method: "POST",
           headers: {
+            Authorization: `Bearer ${accessToken}`,
             "Content-Type": "application/json",
           },
           body: JSON.stringify({ values }),
         });
 
         if (!response.ok) throw new Error("Gagal menyimpan data");
+        return await response.json();
+      }
+
+      async function updateSheetData(sheetName, range, data) {
+        if (!isAuthenticated) {
+          throw new Error(
+            "Silakan login terlebih dahulu untuk mengupdate data"
+          );
+        }
+
+        const url = `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/${range}?valueInputOption=RAW`;
+
+        const response = await fetchWithCorsFallback(url, {
+          method: "PUT",
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            values: [data],
+          }),
+        });
+
+        if (!response.ok) throw new Error("Gagal mengupdate data");
         return await response.json();
       }
 
@@ -624,15 +763,20 @@
         const alertDiv = document.createElement("div");
         alertDiv.className = `alert alert-${type} alert-dismissible fade show mt-2`;
         alertDiv.innerHTML = `
-    ${message}
-    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-  `;
+      ${message}
+      <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    `;
         const container = document.querySelector(".container-fluid");
         container.prepend(alertDiv);
 
-        setTimeout(() => alertDiv.remove(), 5000);
+        setTimeout(() => {
+          if (alertDiv.parentNode) {
+            alertDiv.remove();
+          }
+        }, 5000);
       }
 
+      // ==================== TOKO BUAH SYSTEM ====================
       class TokoBuahSystem {
         constructor() {
           this.masterData = {};
@@ -762,8 +906,8 @@
               const alertDiv = document.createElement("div");
               alertDiv.className = "alert alert-warning";
               alertDiv.innerHTML = `
-                            <strong>${nama}</strong>: Stok ${currentStock} kg (Min: ${stokMin} kg)
-                        `;
+            <strong>${nama}</strong>: Stok ${currentStock} kg (Min: ${stokMin} kg)
+          `;
               alertsContainer.appendChild(alertDiv);
             }
           });
@@ -815,17 +959,15 @@
             }
 
             row.innerHTML = `
-                        <td>${trans[1]}</td>
-                        <td><span class="badge ${
-                          trans.type === "PENJUALAN"
-                            ? "bg-success"
-                            : "bg-warning"
-                        }">${trans.type}</span></td>
-                        <td>${description}</td>
-                        <td class="${
-                          amount >= 0 ? "text-success" : "text-danger"
-                        }">${formatCurrency(Math.abs(amount))}</td>
-                    `;
+          <td>${trans[1]}</td>
+          <td><span class="badge ${
+            trans.type === "PENJUALAN" ? "bg-success" : "bg-warning"
+          }">${trans.type}</span></td>
+          <td>${description}</td>
+          <td class="${
+            amount >= 0 ? "text-success" : "text-danger"
+          }">${formatCurrency(Math.abs(amount))}</td>
+        `;
             container.appendChild(row);
           });
         }
@@ -833,6 +975,8 @@
         updateMasterTables() {
           // Update master buah table
           const tableBuah = document.getElementById("tableMasterBuah");
+          if (!tableBuah) return;
+
           tableBuah.innerHTML = "";
 
           this.masterData.buah.slice(1).forEach((buah, index) => {
@@ -850,50 +994,55 @@
 
             const row = document.createElement("tr");
             row.innerHTML = `
-            <td>${kode}</td>
-            <td>${nama}</td>
-            <td>${kategori}</td>
-            <td>${satuan}</td>
-            <td>${formatCurrency(parseFloat(hargaBeli))}</td>
-            <td>${formatCurrency(parseFloat(hargaJual))}</td>
-            <td>${stokMin} ${satuan}</td>
-            <td>
-                <button class="btn btn-sm btn-outline-primary" onclick="editMasterData('buah', ${index})">
-                    <i class="bi bi-pencil"></i> Edit
-                </button>
-                <button class="btn btn-sm btn-outline-danger" onclick="deleteMasterData('buah', ${index})">
-                    <i class="bi bi-trash"></i> Hapus
-                </button>
-            </td>
+          <td>${kode}</td>
+          <td>${nama}</td>
+          <td>${kategori}</td>
+          <td>${satuan}</td>
+          <td>${formatCurrency(parseFloat(hargaBeli))}</td>
+          <td>${formatCurrency(parseFloat(hargaJual))}</td>
+          <td>${currentStock.toFixed(1)} ${satuan}</td>
+          <td>${stokMin} ${satuan}</td>
+          <td>
+            <button class="btn btn-sm btn-outline-primary" onclick="editMasterData('buah', ${index})">
+              <i class="bi bi-pencil"></i> Edit
+            </button>
+            <button class="btn btn-sm btn-outline-danger" onclick="deleteMasterData('buah', ${index})">
+              <i class="bi bi-trash"></i> Hapus
+            </button>
+          </td>
         `;
             tableBuah.appendChild(row);
           });
-
-          // Similarly update other master tables...
         }
+
         populateDropdowns() {
           // Populate supplier dropdown
           const supplierSelect = document.getElementById("pembelianSupplier");
-          supplierSelect.innerHTML = '<option value="">Pilih Supplier</option>';
-          this.masterData.supplier.slice(1).forEach((supplier) => {
-            const option = document.createElement("option");
-            option.value = supplier[0];
-            option.textContent = supplier[1];
-            supplierSelect.appendChild(option);
-          });
+          if (supplierSelect) {
+            supplierSelect.innerHTML =
+              '<option value="">Pilih Supplier</option>';
+            this.masterData.supplier.slice(1).forEach((supplier) => {
+              const option = document.createElement("option");
+              option.value = supplier[0];
+              option.textContent = supplier[1];
+              supplierSelect.appendChild(option);
+            });
+          }
 
           // Populate buah dropdown
           const buahSelect = document.getElementById("pembelianBuah");
-          buahSelect.innerHTML = '<option value="">Pilih Buah</option>';
-          this.masterData.buah.slice(1).forEach((buah) => {
-            const option = document.createElement("option");
-            option.value = buah[0];
-            option.textContent = `${
-              buah[1]
-            } (Stok: ${this.calculateCurrentStock(buah[0]).toFixed(1)} kg)`;
-            option.setAttribute("data-harga", buah[4]);
-            buahSelect.appendChild(option);
-          });
+          if (buahSelect) {
+            buahSelect.innerHTML = '<option value="">Pilih Buah</option>';
+            this.masterData.buah.slice(1).forEach((buah) => {
+              const option = document.createElement("option");
+              option.value = buah[0];
+              option.textContent = `${
+                buah[1]
+              } (Stok: ${this.calculateCurrentStock(buah[0]).toFixed(1)} kg)`;
+              option.setAttribute("data-harga", buah[4]);
+              buahSelect.appendChild(option);
+            });
+          }
         }
 
         async simpanPembelian(data) {
@@ -913,7 +1062,7 @@
           ];
 
           await appendToSheet(SHEETS.TRANSAKSI_PEMBELIAN, rowData);
-          await this.loadAllData(); // Reload data
+          await this.loadAllData();
         }
 
         async generateLaporanLabaRugi(startDate, endDate) {
@@ -935,7 +1084,7 @@
 
           // Calculate totals
           const totalPenjualan = penjualan.reduce(
-            (sum, t) => sum + parseFloat(t[6]),
+            (sum, t) => sum + parseFloat(t[9]),
             0
           );
           const totalPembelian = pembelian.reduce(
@@ -963,10 +1112,20 @@
       // ==================== MODAL MANAGEMENT ====================
       let currentMasterType = "";
       let editingData = null;
+      let editingIndex = null;
 
-      function showModal(masterType, data = null) {
+      function showModal(masterType, data = null, index = null) {
+        if (!isAuthenticated && !data) {
+          showAlert(
+            "Silakan login terlebih dahulu untuk menambah data",
+            "warning"
+          );
+          return;
+        }
+
         currentMasterType = masterType;
         editingData = data;
+        editingIndex = index;
 
         // Hide all forms first
         document.querySelectorAll("#masterModal form").forEach((form) => {
@@ -1041,10 +1200,9 @@
           pelanggan: "CUST",
           biaya: "BIAYA",
         };
-
         const prefix = prefixes[type];
         const existingData = system.masterData[type] || [];
-        const nextNumber = existingData.length; // +1 because of header
+        const nextNumber = existingData.length;
 
         document.getElementById(`${type}Kode`).value = `${prefix}-${String(
           nextNumber
@@ -1090,7 +1248,6 @@
         document.getElementById("biayaStatus").value = data[5];
       }
 
-      // Save master data
       async function saveMasterData() {
         try {
           let data = [];
@@ -1142,17 +1299,27 @@
           }
 
           if (editingData) {
-            // Update existing data (ini butuh implementasi update, bukan append)
-            await updateMasterData(sheetName, data, editingData);
+            // Find the row to update
+            const allData = await getSheetData(sheetName);
+            const rowIndex = allData.findIndex(
+              (row) => row[0] === editingData[0]
+            );
+
+            if (rowIndex !== -1) {
+              await updateSheetData(
+                sheetName,
+                `${sheetName}!A${rowIndex + 1}`,
+                data
+              );
+            } else {
+              throw new Error("Data tidak ditemukan untuk diupdate");
+            }
           } else {
-            // Add new data
             await appendToSheet(sheetName, data);
           }
 
-          // Reload data
           await system.loadAllData();
 
-          // Close modal
           const modal = bootstrap.Modal.getInstance(
             document.getElementById("masterModal")
           );
@@ -1179,46 +1346,53 @@
         return mapping[masterType];
       }
 
-      // Update master data (simplified - in real app you'd need proper update)
-      async function updateMasterData(sheetName, newData, oldData) {
-        // For now, we'll just append. Proper update requires more complex Google Sheets API usage
-        await appendToSheet(sheetName, newData);
-      }
-
-      // Edit and Delete functions
       function editMasterData(type, index) {
-        const data = system.masterData[type][index + 1]; // +1 karena header
-        showModal(type, data);
+        const data = system.masterData[type][index + 1];
+        showModal(type, data, index);
       }
 
       async function deleteMasterData(type, index) {
-        if (confirm("Apakah Anda yakin ingin menghapus data ini?")) {
-          // Note: Deleting from Google Sheets requires more complex implementation
-          // For now, we'll just show a message
+        if (!isAuthenticated) {
           showAlert(
-            "Fitur delete membutuhkan implementasi Google Sheets API yang lebih kompleks",
+            "Silakan login terlebih dahulu untuk menghapus data",
             "warning"
           );
+          return;
         }
+
+        if (!confirm("Apakah Anda yakin ingin menghapus data ini?")) return;
+
+        showAlert("Fitur delete sedang dalam pengembangan", "info");
       }
+
       // ==================== INITIALIZATION ====================
       const system = new TokoBuahSystem();
 
       document.addEventListener("DOMContentLoaded", function () {
+        // Initialize auth
+        initAuth();
+
         // Set current date
         const now = new Date();
-        document.getElementById("pembelianTanggal").valueAsDate = now;
-        document.getElementById("reportStartDate").valueAsDate = new Date(
-          now.getFullYear(),
-          now.getMonth(),
-          1
-        );
-        document.getElementById("reportEndDate").valueAsDate = now;
+        const pembelianTanggal = document.getElementById("pembelianTanggal");
+        const reportStartDate = document.getElementById("reportStartDate");
+        const reportEndDate = document.getElementById("reportEndDate");
+
+        if (pembelianTanggal) pembelianTanggal.valueAsDate = now;
+        if (reportStartDate)
+          reportStartDate.valueAsDate = new Date(
+            now.getFullYear(),
+            now.getMonth(),
+            1
+          );
+        if (reportEndDate) reportEndDate.valueAsDate = now;
 
         // Update current date time
         function updateDateTime() {
-          document.getElementById("currentDateTime").textContent =
-            new Date().toLocaleString("id-ID");
+          const currentDateTime = document.getElementById("currentDateTime");
+          if (currentDateTime) {
+            currentDateTime.textContent = new Date().toLocaleString("id-ID");
+          }
         }
         setInterval(updateDateTime, 1000);
         updateDateTime();
@@ -1227,10 +1401,18 @@
         system.loadAllData();
 
         // Setup form handlers
-        document
-          .getElementById("formPembelian")
-          .addEventListener("submit", async function (e) {
+        const formPembelian = document.getElementById("formPembelian");
+        if (formPembelian) {
+          formPembelian.addEventListener("submit", async function (e) {
             e.preventDefault();
+
+            if (!isAuthenticated) {
+              showAlert(
+                "Silakan login terlebih dahulu untuk menambah data pembelian",
+                "warning"
+              );
+              return;
+            }
 
             const data = {
               tanggal: document.getElementById("pembelianTanggal").value,
@@ -1258,17 +1440,20 @@
               );
             }
           });
+        }
 
         // Auto-fill harga when buah is selected
-        document
-          .getElementById("pembelianBuah")
-          .addEventListener("change", function () {
+        const pembelianBuah = document.getElementById("pembelianBuah");
+        if (pembelianBuah) {
+          pembelianBuah.addEventListener("change", function () {
             const selectedOption = this.options[this.selectedIndex];
             const harga = selectedOption.getAttribute("data-harga");
-            if (harga) {
-              document.getElementById("pembelianHarga").value = harga;
+            const hargaInput = document.getElementById("pembelianHarga");
+            if (harga && hargaInput) {
+              hargaInput.value = harga;
             }
           });
+        }
       });
 
       // ==================== REPORT GENERATION ====================
@@ -1285,49 +1470,34 @@
             startDate,
             endDate
           );
-
-          // Display laba rugi report
           const labaRugiContainer = document.getElementById("laporanLabaRugi");
-          labaRugiContainer.innerHTML = `
-                    <div class="row">
-                        <div class="col-md-6">
-                            <table class="table table-bordered">
-                                <tr>
-                                    <th>Pendapatan Penjualan</th>
-                                    <td class="text-end">${formatCurrency(
-                                      laporan.totalPenjualan
-                                    )}</td>
-                                </tr>
-                                <tr>
-                                    <th>Harga Pokok Penjualan</th>
-                                    <td class="text-end">${formatCurrency(
-                                      laporan.totalPembelian
-                                    )}</td>
-                                </tr>
-                                <tr class="table-success">
-                                    <th><strong>Laba Kotor</strong></th>
-                                    <td class="text-end"><strong>${formatCurrency(
-                                      laporan.labaKotor
-                                    )}</strong></td>
-                                </tr>
-                                <tr>
-                                    <th>Biaya Operasional</th>
-                                    <td class="text-end">${formatCurrency(
-                                      laporan.totalBiaya
-                                    )}</td>
-                                </tr>
-                                <tr class="table-primary">
-                                    <th><strong>LABA BERSIH</strong></th>
-                                    <td class="text-end"><strong>${formatCurrency(
-                                      laporan.labaBersih
-                                    )}</strong></td>
-                                </tr>
-                            </table>
-                        </div>
-                    </div>
-                `;
 
-          // Generate stock report
+          if (labaRugiContainer) {
+            labaRugiContainer.innerHTML = `
+          <div class="row">
+            <div class="col-md-6">
+              <table class="table table-bordered">
+                <tr><th>Pendapatan Penjualan</th><td class="text-end">${formatCurrency(
+                  laporan.totalPenjualan
+                )}</td></tr>
+                <tr><th>Harga Pokok Penjualan</th><td class="text-end">${formatCurrency(
+                  laporan.totalPembelian
+                )}</td></tr>
+                <tr class="table-success"><th><strong>Laba Kotor</strong></th><td class="text-end"><strong>${formatCurrency(
+                  laporan.labaKotor
+                )}</strong></td></tr>
+                <tr><th>Biaya Operasional</th><td class="text-end">${formatCurrency(
+                  laporan.totalBiaya
+                )}</td></tr>
+                <tr class="table-primary"><th><strong>LABA BERSIH</strong></th><td class="text-end"><strong>${formatCurrency(
+                  laporan.labaBersih
+                )}</strong></td></tr>
+              </table>
+            </div>
+          </div>
+        `;
+          }
+
           await generateLaporanStok();
         } catch (error) {
           showAlert("Error generating report: " + error.message, "danger");
@@ -1336,13 +1506,14 @@
 
       async function generateLaporanStok() {
         const stokContainer = document.getElementById("laporanStok");
+        if (!stokContainer) return;
+
         stokContainer.innerHTML = "";
 
         system.masterData.buah.slice(1).forEach((buah) => {
-          const [kode, nama] = buah;
+          const [kode, nama, , satuan, hargaBeli] = buah;
           const currentStock = system.calculateCurrentStock(kode);
 
-          // Calculate total pembelian and penjualan
           const totalPembelian = system.transactions.pembelian
             .slice(1)
             .filter((t) => t[3] === kode)
@@ -1353,19 +1524,17 @@
             .filter((t) => t[3] === kode)
             .reduce((sum, t) => sum + parseFloat(t[4]), 0);
 
-          // Calculate inventory value (using average cost)
-          const hargaBeli = parseFloat(buah[4]);
-          const nilaiPersediaan = currentStock * hargaBeli;
+          const nilaiPersediaan = currentStock * parseFloat(hargaBeli);
 
           const row = document.createElement("tr");
           row.innerHTML = `
-                    <td>${nama}</td>
-                    <td>0 kg</td> <!-- Stok awal would need historical data -->
-                    <td>${totalPembelian.toFixed(1)} kg</td>
-                    <td>${totalPenjualan.toFixed(1)} kg</td>
-                    <td><strong>${currentStock.toFixed(1)} kg</strong></td>
-                    <td>${formatCurrency(nilaiPersediaan)}</td>
-                `;
+        <td>${nama}</td>
+        <td>0 ${satuan}</td>
+        <td>${totalPembelian.toFixed(1)} ${satuan}</td>
+        <td>${totalPenjualan.toFixed(1)} ${satuan}</td>
+        <td><strong>${currentStock.toFixed(1)} ${satuan}</strong></td>
+        <td>${formatCurrency(nilaiPersediaan)}</td>
+      `;
           stokContainer.appendChild(row);
         });
       }
@@ -1373,6 +1542,12 @@
       // Export functions for global access
       window.generateLaporan = generateLaporan;
       window.system = system;
+      window.login = login;
+      window.logout = logout;
+      window.showModal = showModal;
+      window.saveMasterData = saveMasterData;
+      window.editMasterData = editMasterData;
+      window.deleteMasterData = deleteMasterData;
     </script>
 
     <!-- modal -->

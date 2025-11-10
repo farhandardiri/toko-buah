@@ -493,17 +493,14 @@ function populateJenisBiayaDropdown() {
     return;
   }
 
-  console.log("Memulai populateJenisBiayaDropdown...");
+  console.log("=== DEBUG POPULATE JENIS BIAYA ===");
   console.log("Data biaya system:", system.masterData.biaya);
-  console.log(
-    "Jumlah data biaya:",
-    system.masterData.biaya ? system.masterData.biaya.length : 0
-  );
 
   select.innerHTML = '<option value="">Pilih Jenis Biaya</option>';
 
-  if (!system.masterData.biaya || system.masterData.buah.length <= 1) {
-    console.log("Tidak ada data jenis biaya atau hanya header");
+  // Cek jika data biaya tidak ada atau kosong
+  if (!system.masterData.biaya || system.masterData.biaya.length <= 1) {
+    console.log("❌ Tidak ada data jenis biaya atau hanya header");
     const option = document.createElement("option");
     option.value = "";
     option.textContent = "Tidak ada data jenis biaya";
@@ -512,70 +509,83 @@ function populateJenisBiayaDropdown() {
     return;
   }
 
+  const dataBiaya = system.masterData.biaya.slice(1); // Skip header
+  console.log(`Data biaya (setelah slice):`, dataBiaya);
+  console.log(`Jumlah data biaya: ${dataBiaya.length}`);
+
   let jumlahOptionDitambahkan = 0;
 
-  // Loop melalui data biaya (skip header)
-  system.masterData.biaya.slice(1).forEach((biaya, index) => {
-    console.log(`Data biaya [${index}]:`, biaya);
+  dataBiaya.forEach((biaya, index) => {
+    console.log(`--- Data biaya [${index}] ---`);
+    console.log("Raw data:", biaya);
 
-    if (!biaya || biaya.length < 2) {
-      console.warn("Data biaya tidak lengkap:", biaya);
+    // Handle jika data tidak lengkap
+    if (!biaya || !Array.isArray(biaya)) {
+      console.warn("❌ Data biaya tidak valid atau bukan array");
       return;
     }
 
-    const kode = biaya[0] || "";
-    const nama = biaya[1] || "";
+    // Ambil data dengan default values
+    const kode = biaya[0] || `BIAYA-${index + 1}`;
+    const nama = biaya[1] || `Biaya ${index + 1}`;
     const kategori = biaya[2] || "Umum";
     const sub_kategori = biaya[3] || "Lainnya";
     const budget = biaya[4] || "0";
     const status = biaya[5] || "";
 
     console.log(
-      `Processing: ${kode} - ${nama}, Status: ${status}, Budget: ${budget}`
+      `Extracted - Kode: ${kode}, Nama: ${nama}, Status: "${status}"`
     );
 
-    // Filter yang lebih fleksibel untuk status
-    const statusLower = status.toString().toLowerCase();
-    const isActive =
-      statusLower === "active" ||
-      statusLower === "aktif" ||
-      statusLower === "yes" ||
-      statusLower === "y" ||
-      statusLower === "true" ||
-      status === ""; // Jika kosong, anggap aktif
+    // LOGIC FILTERING YANG LEBIH FLEKSIBEL
+    // Anggap semua data aktif kecuali yang explicitly non-active
+    const statusLower = status.toString().toLowerCase().trim();
+    const isNonActive =
+      statusLower === "nonactive" ||
+      statusLower === "non aktif" ||
+      statusLower === "tidak aktif" ||
+      statusLower === "no" ||
+      statusLower === "false" ||
+      statusLower === "non" ||
+      statusLower === "inactive";
 
-    if (isActive) {
+    if (!isNonActive) {
       const option = document.createElement("option");
       option.value = kode;
-      option.textContent = `${nama} (${kategori} - ${sub_kategori}) - Budget: ${formatCurrency(
-        parseFloat(budget) || 0
-      )}`;
+
+      // Format teks option
+      const budgetFormatted = formatCurrency(parseFloat(budget) || 0);
+      option.textContent = `${nama} (${kategori} - ${sub_kategori}) - Budget: ${budgetFormatted}`;
+
+      // Set attributes untuk digunakan nanti
       option.setAttribute("data-budget", budget);
       option.setAttribute("data-kategori", kategori);
       option.setAttribute("data-subkategori", sub_kategori);
+      option.setAttribute("data-nama", nama);
+
       select.appendChild(option);
       jumlahOptionDitambahkan++;
-      console.log(`✓ Menambahkan option untuk ${nama}`);
+      console.log(`✅ ADDED: ${nama}`);
     } else {
-      console.log(`✗ Skip ${nama} karena status: ${status}`);
+      console.log(`⏭️ SKIPPED: ${nama} - Status: ${status}`);
     }
   });
 
-  console.log(
-    `Selesai populateJenisBiayaDropdown, jumlah option ditambahkan: ${jumlahOptionDitambahkan}`
-  );
+  console.log(`=== SELESAI: ${jumlahOptionDitambahkan} option ditambahkan ===`);
 
-  // Jika tidak ada biaya yang aktif
+  // Jika tidak ada yang ditambahkan, beri pesan
   if (jumlahOptionDitambahkan === 0) {
-    console.log("Tidak ada jenis biaya yang aktif");
+    console.log("⚠️ Tidak ada jenis biaya yang bisa ditampilkan");
     const option = document.createElement("option");
     option.value = "";
-    option.textContent = "Tidak ada jenis biaya yang aktif";
+    option.textContent = "Tidak ada jenis biaya yang tersedia";
     option.disabled = true;
     select.appendChild(option);
+
+    // Tampilkan semua data untuk debugging
+    console.log("📋 Semua data biaya (untuk debugging):", dataBiaya);
   }
 }
-
 function calculateTotalBiayaBulanIni() {
   const currentMonth = new Date().getMonth();
   const currentYear = new Date().getFullYear();

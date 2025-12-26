@@ -1,9 +1,9 @@
 // ==================== CONFIGURATION ====================
-const SPREADSHEET_ID = "1ThcHof6jVMwKkcgT9qVeikewmFm_3G0IdHnxElif5rA";
-const API_KEY = "AIzaSyDEif5uDoVmYUxrthp8AT1v3aurWdJgLfo";
+const SPREADSHEET_ID = "preadshett id";
+const API_KEY = "apikey";
 // OAuth Configuration - GANTI DENGAN CLIENT ID ANDA
 const CLIENT_ID =
-  "1060874294167-jtgis0o8blc7c9qb8g1jrnujkq072u5i.apps.googleusercontent.com";
+  "clientaid.apps.googleusercontent.com";
 const SCOPES = "https://www.googleapis.com/auth/spreadsheets";
 
 const SHEETS = {
